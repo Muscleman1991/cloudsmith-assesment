@@ -38,6 +38,14 @@ jobs:
         run: ls -la dist/
         shell: bash
 
+      - name: Install Cloudsmith CLI        
+        run: |
+          # download latest release and make it executable
+          curl -s https://api.github.com/repos/cloudsmith-io/cloudsmith-cli/releases/latest | sed -n 's/"browser_download_url": //p' | xargs wget -qO cloudsmith.pyz
+          chmod +x ./cloudsmith.pyz
+          #  move it into your $PATH
+          sudo mv ./cloudsmith.pyz /usr/local/bin/cloudsmith
+
       - name: Push package to Cloudsmith
         run: |
           if ! ls dist/*.tar.gz 1> /dev/null 2>&1; then
@@ -46,3 +54,5 @@ jobs:
           fi
           cloudsmith push python ${{ env.CLOUDSMITH_NAMESPACE }}/${{ env.CLOUDSMITH_REPOSITORY }} dist/*.tar.gz --republish
         shell: bash
+        env:
+          CLOUDSMITH_API_KEY: ${{ secrets.CLOUDSMITH_API_KEY }}
