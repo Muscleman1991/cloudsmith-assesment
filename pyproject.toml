@@ -18,4 +18,4 @@ classifiers = [
 dynamic = ["version"]
 
 [tool.hatch.version]
-path = "__init__.py"
+path = "src/example_package/__init__.py"
