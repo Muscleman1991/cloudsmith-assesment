@@ -1,8 +1,11 @@
 name: Promote Python Package
 
+
 on:
+  workflow_dispatch:
   repository_dispatch:
     types: [package_synchronized]
+
 
 env:
   CLOUDSMITH_NAMESPACE: ${{ vars.CLOUDSMITH_NAMESPACE }}
