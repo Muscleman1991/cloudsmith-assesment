@@ -39,10 +39,11 @@ jobs:
       
       - name: Install Cloudsmith CLI        
         run: |
-          curl -sSL https://dl.cloudsmith.io/public/cloudsmith/client/gpg.key | sudo gpg --dearmor -o /usr/share/keyrings/cloudsmith-archive-keyring.gpg
-          echo "deb [signed-by=/usr/share/keyrings/cloudsmith-archive-keyring.gpg] https://dl.cloudsmith.io/public/cloudsmith/client/debian.deb.txt focal main" | sudo tee /etc/apt/sources.list.d/cloudsmith-client.list
-          sudo apt-get update
-          sudo apt-get install -y cloudsmith-cli
+          # download latest release and make it executable
+          curl -s https://api.github.com/repos/cloudsmith-io/cloudsmith-cli/releases/latest | sed -n 's/"browser_download_url": //p' | xargs wget -qO cloudsmith.pyz
+          chmod +x ./cloudsmith.pyz
+          #  move it into your $PATH
+          sudo mv ./cloudsmith.pyz /usr/local/bin/cloudsmith
 
       - name: Publish package to Cloudsmith 
         run: cloudsmith push python your_namespace/staging dist/*.tar.gz --republish
