@@ -1,57 +1,56 @@
-name: Promote Python Package
-
+name: Publish Python Package
 
 on:
-  workflow_dispatch:
-  repository_dispatch:
-    types: [package_synchronized]
-
+  workflow_run:
+    workflows: ["Build Python Package"]
+    types:
+      - completed
+    branches:
+      - main
 
 env:
   CLOUDSMITH_NAMESPACE: ${{ vars.CLOUDSMITH_NAMESPACE }}
-  CLOUDSMITH_STAGING_REPO: 'staging'
-  CLOUDSMITH_PRODUCTION_REPO: 'production'
+  CLOUDSMITH_REPOSITORY: "staging"
   CLOUDSMITH_SERVICE_SLUG: ${{ vars.CLOUDSMITH_SERVICE_SLUG }}
 
 permissions:
+  contents: read
+  actions: read
   id-token: write
 
 jobs:
-  promote:
+  publish:
     runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
 
     steps:
-      - name: Install Cloudsmith CLI
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: python-package
+          path: dist
+          repository: ${{ github.repository }}
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+
+
+      - name: List directory contents
+        run: ls -la dist/
+        shell: bash
+
+
+      - name: Install Cloudsmith CLI and authenticate with OIDC
         uses: cloudsmith-io/cloudsmith-cli-action@v1.0.1
         with:
           oidc-namespace: ${{ env.CLOUDSMITH_NAMESPACE }}
           oidc-service-slug: ${{ env.CLOUDSMITH_SERVICE_SLUG }}
 
-      - name: Extract package info from webhook payload
+      - name: Push package to Cloudsmith
         run: |
-          PACKAGE_NAME=$(echo "${{ github.event.client_payload.package_name }}" | tr -d '"')
-          PACKAGE_VERSION=$(echo "${{ github.event.client_payload.package_version }}" | tr -d '"')
-          echo "PACKAGE_NAME=$PACKAGE_NAME" >> $GITHUB_ENV
-          echo "PACKAGE_VERSION=$PACKAGE_VERSION" >> $GITHUB_ENV
-
-      - name: Tag package ready-for-production
-        run: |
-          cloudsmith tag python ${{ env.CLOUDSMITH_NAMESPACE }}/${{ env.CLOUDSMITH_STAGING_REPO }} "$PACKAGE_NAME" ready-for-production
-        env:
-          CLOUDSMITH_API_KEY: ${{ secrets.CLOUDSMITH_API_KEY }}
-
-      - name: Promote all ready-for-production packages
-        run: |
-          PACKAGE_QUERY=$(cloudsmith list python ${{ env.CLOUDSMITH_NAMESPACE }}/${{ env.CLOUDSMITH_STAGING_REPO }} --tag ready-for-production --json | jq -r '.[].identifier_perm')
-          
-          if [ -z "$PACKAGE_QUERY" ]; then
-            echo "No packages tagged ready-for-production found."
+          if ! ls dist/*.tar.gz 1> /dev/null 2>&1; then
+            echo "No package found to upload"
             exit 1
           fi
-          
-          for IDENTIFIER in $PACKAGE_QUERY; do
-            echo "Promoting package: $IDENTIFIER"
-            cloudsmith mv --yes ${{ env.CLOUDSMITH_NAMESPACE }}/${{ env.CLOUDSMITH_STAGING_REPO }}/$IDENTIFIER ${{ env.CLOUDSMITH_PRODUCTION_REPO }}
-          done
-        env:
-          CLOUDSMITH_API_KEY: ${{ secrets.CLOUDSMITH_API_KEY }}
+          cloudsmith push python ${{ env.CLOUDSMITH_NAMESPACE }}/${{ env.CLOUDSMITH_REPOSITORY }} dist/*.tar.gz --republish
+        shell: bash

@@ -16,6 +16,7 @@ env:
 permissions:
   contents: read
   actions: read
+  id-token: write
 
 jobs:
   publish:
@@ -38,14 +39,12 @@ jobs:
         run: ls -la dist/
         shell: bash
 
-      - name: Install Cloudsmith CLI        
-        run: |
-          # download latest release and make it executable
-          curl -s https://api.github.com/repos/cloudsmith-io/cloudsmith-cli/releases/latest | sed -n 's/"browser_download_url": //p' | xargs wget -qO cloudsmith.pyz
-          chmod +x ./cloudsmith.pyz
-          #  move it into your $PATH
-          sudo mv ./cloudsmith.pyz /usr/local/bin/cloudsmith
-          
+
+      - name: Install Cloudsmith CLI and authenticate with OIDC
+        uses: cloudsmith-io/cloudsmith-cli-action@v1.0.1
+        with:
+          oidc-namespace: ${{ env.CLOUDSMITH_NAMESPACE }}
+          oidc-service-slug: ${{ env.CLOUDSMITH_SERVICE_SLUG }}
 
       - name: Push package to Cloudsmith
         run: |
@@ -55,6 +54,3 @@ jobs:
           fi
           cloudsmith push python ${{ env.CLOUDSMITH_NAMESPACE }}/${{ env.CLOUDSMITH_REPOSITORY }} dist/*.tar.gz --republish
         shell: bash
-        env:
-          CLOUDSMITH_API_KEY: ${{ secrets.CLOUDSMITH_API_KEY }}
-
