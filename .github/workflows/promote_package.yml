@@ -1,67 +1,55 @@
-name: Publish Python Package
+name: Promote Python Package
+
 
 on:
-  workflow_run:
-    workflows: ["Build Python Package"]
-    types:
-      - completed
-    branches:
-      - main
+  repository_dispatch:
+    types: [cloudsmith-package-synced]
 
 env:
   CLOUDSMITH_NAMESPACE: ${{ vars.CLOUDSMITH_NAMESPACE }}
-  CLOUDSMITH_REPOSITORY: "staging"
+  CLOUDSMITH_STAGING_REPO: 'staging'
+  CLOUDSMITH_PRODUCTION_REPO: 'production'
   CLOUDSMITH_SERVICE_SLUG: ${{ vars.CLOUDSMITH_SERVICE_SLUG }}
+  PACKAGE_NAME: 'example_package'
 
 permissions:
-  contents: read
-  actions: read
   id-token: write
 
 jobs:
-  publish:
+  promote:
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
 
     steps:
-      - name: Download artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: python-package
-          path: dist
-          repository: ${{ github.repository }}
-          github-token: ${{ github.token }}
-          run-id: ${{ github.event.workflow_run.id }}
-
-
-
-      - name: List directory contents
-        run: ls -la dist/
-        shell: bash
-      
-      - name: Debug OIDC token
-        run: |
-          echo "Requesting OIDC token ..."
-          echo "ID_TOKEN_REQUEST_URL: $ACTIONS_ID_TOKEN_REQUEST_URL "
-          TOKEN=$(curl -sSL -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-                "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=cloudsmith" | jq -r .value)
-          echo "OIDC Token (first 100 chars): ${TOKEN:0:100}"
-          echo "$TOKEN" | cut -d '.' -f2 | base64 --decode | jq
-
-
-      - name: Install Cloudsmith CLI and authenticate with OIDC
+      - name: Install Cloudsmith CLI
         uses: cloudsmith-io/cloudsmith-cli-action@v1.0.1
         with:
           oidc-namespace: ${{ env.CLOUDSMITH_NAMESPACE }}
           oidc-service-slug: ${{ env.CLOUDSMITH_SERVICE_SLUG }}
 
-      - name: Push package to Cloudsmith
+      - name: Get package identifier and promote
         run: |
-          if ! ls dist/*.tar.gz 1> /dev/null 2>&1; then
-            echo "No package found to upload"
+          # Query for the package and get its identifier
+          PACKAGE_VERSION="${{ github.event.client_payload.version }}"
+          PACKAGE_QUERY="filename:${PACKAGE_NAME}-${PACKAGE_VERSION}.tar.gz"
+          echo "Searching for package with query: $PACKAGE_QUERY"
+          
+          PACKAGE_DATA=$(cloudsmith list package ${{ env.CLOUDSMITH_NAMESPACE }}/${{ env.CLOUDSMITH_STAGING_REPO }} -q "$PACKAGE_QUERY" -F json)
+          
+          # Extract the identifier_perm using jq
+          IDENTIFIER=$(echo "$PACKAGE_DATA" | jq -r '.data[0].identifier_perm')
+          
+          if [ -z "$IDENTIFIER" ] || [ "$IDENTIFIER" = "null" ]; then
+            echo "Failed to find package identifier"
             exit 1
           fi
-          cloudsmith push python ${{ env.CLOUDSMITH_NAMESPACE }}/${{ env.CLOUDSMITH_REPOSITORY }} dist/*.tar.gz --republish
+          
+          echo "Found package identifier: $IDENTIFIER"
 
+          echo "Tagging package $IDENTIFIER with 'ready-for-production'"
+          cloudsmith tags add ${{ env.CLOUDSMITH_NAMESPACE }}/${{ env.CLOUDSMITH_STAGING_REPO }}/$IDENTIFIER ready-for-production
+          
+          # Promote package using the identifier
+          cloudsmith mv --yes \
+            ${{ env.CLOUDSMITH_NAMESPACE }}/${{ env.CLOUDSMITH_STAGING_REPO }}/$IDENTIFIER \
+            ${{ env.CLOUDSMITH_PRODUCTION_REPO }}
         shell: bash
-
